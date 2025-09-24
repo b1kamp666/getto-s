@@ -23,3 +23,5 @@ TOTAL BLACKOPS REDTEAM MASTER HACKIN TUTORIAL:
 1. install python reqs >  pip install -r requirements.txt
 2. run get.py > python get.py
 3. have fun
+
+EXPECT BUGS COCKROACHES ASSELN
