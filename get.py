@@ -4,7 +4,6 @@ import asyncio
 import aiohttp
 import random
 import subprocess
-import json
 from aiohttp import ClientTimeout
 from tqdm import tqdm
 
@@ -15,7 +14,6 @@ MIN_DELAY = 1.5
 MAX_DELAY = 2.5
 MAX_RETRIES = 3
 RETRY_DELAY = 2
-STATE_FILE = "state.json"
 
 # --- Helper functions ---
 async def fetch_html(session, url, semaphore, retries=MAX_RETRIES):
@@ -45,23 +43,18 @@ def load_existing_links(file_path):
             return set(line.strip() for line in f if line.strip())
     return set()
 
-def save_state(start_url, base_name):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump({"url": start_url, "name": base_name}, f)
-
-def load_state():
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return None
-
 # --- Scraping ---
 async def process_episode(session, ep_url, existing_links, semaphore):
     html = await fetch_html(session, ep_url, semaphore)
     if not html:
         return []
     redirects = re.findall(r"/redirect/\d+", html)
-    return [BASE_URL + r for r in sorted(set(redirects)) if BASE_URL + r not in existing_links]
+    if not redirects:
+        return []
+    first_link = BASE_URL + redirects[0]
+    if first_link not in existing_links:
+        return [first_link]
+    return []
 
 async def process_season(session, season_link, existing_links, semaphore):
     full_season_url = BASE_URL + season_link
@@ -84,21 +77,13 @@ async def process_season(session, season_link, existing_links, semaphore):
         results.extend(res)
     return results
 
-async def scrape_series(resume=False):
-    if resume:
-        state = load_state()
-        if not state:
-            print("⚠️ No saved state found.")
-            return None
-        start_url = state["url"]
-        base_name = state["name"]
-        print(f"▶️ Resuming: {base_name} ({start_url})")
-    else:
-        start_url = input("Enter the main series page URL: ").strip()
-        base_name = input("Enter series name for txt files: ").strip()
-        save_state(start_url, base_name)
+async def scrape_series():
+    start_url = input("Enter the main series page URL: ").strip()
+    base_name = input("Enter series name for folder: ").strip()
 
-    os.makedirs(TXT_FOLDER, exist_ok=True)
+    # create folder for this series
+    series_folder = os.path.join(TXT_FOLDER, base_name)
+    os.makedirs(series_folder, exist_ok=True)
 
     semaphore = asyncio.Semaphore(CONCURRENT_REQUESTS)
     async with aiohttp.ClientSession() as session:
@@ -106,7 +91,7 @@ async def scrape_series(resume=False):
         if not html:
             return None
 
-        # preview
+        # find seasons
         season_pattern = r'<a[^>]+href="(/serie/stream/[^"]*/staffel-\d+)"'
         seasons = sorted(set(re.findall(season_pattern, html)))
         if not seasons:
@@ -119,14 +104,9 @@ async def scrape_series(resume=False):
             episodes = re.findall(r'<a[^>]+href="(/serie/stream/[^"]*/staffel-\d+/episode-\d+)"', s_html or "")
             print(f"  Season {idx}: {len(set(episodes))} episodes")
 
-        confirm = input("Proceed with scraping? (y/n): ").strip().lower()
-        if confirm != "y":
-            print("❌ Cancelled.")
-            return None
-
-        # scrape each season separately into its own file
+        # scrape each season
         for idx, season_link in enumerate(seasons, 1):
-            output_file = os.path.join(TXT_FOLDER, f"{base_name}_season{idx}.txt")
+            output_file = os.path.join(series_folder, f"season{idx}.txt")
             existing_links = load_existing_links(output_file)
             redirects = await process_season(session, season_link, existing_links, semaphore)
             if redirects:
@@ -137,7 +117,11 @@ async def scrape_series(resume=False):
 
 # --- Download ---
 def list_txt_files():
-    files = sorted([f for f in os.listdir(TXT_FOLDER) if f.endswith(".txt")])
+    files = []
+    for root, _, filenames in os.walk(TXT_FOLDER):
+        for f in filenames:
+            if f.endswith(".txt"):
+                files.append(os.path.join(root, f))
     if not files:
         print("⚠️ No txt files found.")
         return []
@@ -156,12 +140,12 @@ def download_txt_files():
     with open(tmp_file, "w", encoding="utf-8") as outfile:
         if selection.lower() == "all":
             for f in files:
-                with open(os.path.join(TXT_FOLDER, f), "r", encoding="utf-8") as infile:
+                with open(f, "r", encoding="utf-8") as infile:
                     outfile.writelines(infile.readlines())
         else:
             indices = [int(x)-1 for x in selection.split(",") if x.isdigit() and 0 < int(x) <= len(files)]
             for i in indices:
-                with open(os.path.join(TXT_FOLDER, files[i]), "r", encoding="utf-8") as infile:
+                with open(files[i], "r", encoding="utf-8") as infile:
                     outfile.writelines(infile.readlines())
 
     print(f"\n▶️ Starting downloader with {tmp_file} ...")
@@ -173,9 +157,8 @@ def menu():
     os.makedirs(TXT_FOLDER, exist_ok=True)
     while True:
         print("\n=== Series Scraper & Downloader ===")
-        print("1: Scrape series into txt file")
+        print("1: Scrape series into folder")
         print("2: Download from saved txt files")
-        print("3: Resume last scrape")
         print("0: Exit")
         choice = input("Select option: ").strip()
 
@@ -183,8 +166,6 @@ def menu():
             asyncio.run(scrape_series())
         elif choice == "2":
             download_txt_files()
-        elif choice == "3":
-            asyncio.run(scrape_series(resume=True))
         elif choice == "0":
             break
         else:
