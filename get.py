@@ -8,7 +8,7 @@ from aiohttp import ClientTimeout
 from tqdm import tqdm
 
 BASE_URL = "https://s.to"
-TXT_FOLDER = "txt"
+TXT_FOLDER = "backpack"
 CONCURRENT_REQUESTS = 5
 MIN_DELAY = 1.5
 MAX_DELAY = 2.5
@@ -156,9 +156,9 @@ def download_txt_files():
 def menu():
     os.makedirs(TXT_FOLDER, exist_ok=True)
     while True:
-        print("\n=== Series Scraper & Downloader ===")
-        print("1: Scrape series into folder")
-        print("2: Download from saved txt files")
+        print("\n=== Series Containern & Dumpster Driver ===")
+        print("1: Dumpsterdive finest series out of thrash direct into your backpack")
+        print("2: Upcycle found goodies")
         print("0: Exit")
         choice = input("Select option: ").strip()
 
